@@ -1,6 +1,7 @@
 # coding=utf-8
 # Copyleft 2019 project LXRT.
-
+import sys
+sys.path.append("./src")
 import os
 import collections
 
