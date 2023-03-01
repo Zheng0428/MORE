@@ -46,9 +46,9 @@ class MORE:
             self.valid_tuple = None
         
         # Model
-        self.model = MOREModel()
+        self.model = MOREModel() # Have already load the MORE_decoder weights
 
-        # Load pre-trained weights
+        # Load MORE_Encoder weights
         if args.load_lxmert is not None:
             self.model.more_encoder.load(args.load_lxmert)
         # GPU options
@@ -74,27 +74,35 @@ class MORE:
         self.output = args.output
         os.makedirs(self.output, exist_ok=True)
 
-    def train(self, train_tuple, eval_tuple):
+    def train(self, train_tuple, eval_tuple, epoch_freeze):
         dset, loader, evaluator = train_tuple
         iter_wrapper = (lambda x: tqdm(x, total=len(loader))) if args.tqdm else (lambda x: x)
 
         best_valid = 0.
+
+        # Freeze the parameters of the encoder for the first few epochs
+        for param in self.model.more_encoder.parameters():
+            param.requires_grad = False
+        # Unfreeze the parameters of the decoder
+        for param in self.model.more_decoder.parameters():
+            param.requires_grad = True
+
         for epoch in range(args.epochs):
             quesid2ans = {}
-            for i, (ques_id, feats, boxes, sent, target) in iter_wrapper(enumerate(loader)):
-
+            for i, (ques_id, state, boxes, action, target) in iter_wrapper(enumerate(loader)):
                 self.model.train()
-                self.optim.zero_grad()
-
-                feats, boxes, target = feats.cuda(), boxes.cuda(), target.cuda()
-                logit = self.model(feats, boxes, sent)
-                assert logit.dim() == target.dim() == 2
+                self.optim.zero_grad()   #梯度归零
+                reward = torch.round(torch.rand(32, 1))
+                state, boxes, target = state.cuda(), boxes.cuda(), target.cuda()
+                
+                logit = self.model(state, boxes, action, reward).logits
+                #assert logit.dim() == target.dim() == 2
                 loss = self.bce_loss(logit, target)
                 loss = loss * logit.size(1)
 
-                loss.backward()
+                loss.backward()  #反向传播
                 nn.utils.clip_grad_norm_(self.model.parameters(), 5.)
-                self.optim.step()
+                self.optim.step()  #参数更新
 
                 score, label = logit.max(1)
                 for qid, l in zip(ques_id, label.cpu().numpy()):
@@ -102,6 +110,11 @@ class MORE:
                     quesid2ans[qid.item()] = ans
 
             log_str = "\nEpoch %d: Train %0.2f\n" % (epoch, evaluator.evaluate(quesid2ans) * 100.)
+
+            #Unfreeze the parameters of the encoder after few epochs
+            if epoch == epoch_freeze:                 
+                for param in self.model.more_encoder.parameters():
+                    param.requires_grad = True
 
             if self.valid_tuple is not None:  # Do Validation
                 valid_score = self.evaluate(eval_tuple)
@@ -178,17 +191,17 @@ if __name__ == "__main__":
     # Note: It is different from loading LXMERT pre-trained weights.
     if args.load is not None:
         more.load(args.load)
-
+    more.train(more.train_tuple, more.valid_tuple, args.epoch_freeze) # First run the training through
     # Test or Train
-    if args.test is not None:
-       pass
-    else:
-        print('Splits in Train data:', vqa.train_tuple.dataset.splits)
-        if vqa.valid_tuple is not None:
-            print('Splits in Valid data:', vqa.valid_tuple.dataset.splits)
-            print("Valid Oracle: %0.2f" % (vqa.oracle_score(vqa.valid_tuple) * 100))
-        else:
-            print("DO NOT USE VALIDATION")
-        vqa.train(vqa.train_tuple, vqa.valid_tuple)
+    # if args.test is not None:
+    #    pass
+    # else:
+    #     print('Splits in Train data:', vqa.train_tuple.dataset.splits)
+    #     if vqa.valid_tuple is not None:
+    #         print('Splits in Valid data:', vqa.valid_tuple.dataset.splits)
+    #         print("Valid Oracle: %0.2f" % (vqa.oracle_score(vqa.valid_tuple) * 100))
+    #     else:
+    #         print("DO NOT USE VALIDATION")
+    #     more.train(vqa.train_tuple, vqa.valid_tuple)
 
 

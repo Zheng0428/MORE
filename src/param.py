@@ -88,6 +88,8 @@ def parse_args():
     parser.add_argument("--multiGPU", action='store_const', default=False, const=True)
     parser.add_argument("--numWorkers", dest='num_workers', default=0)
 
+    #MORE needed
+    parser.add_argument("--epochfreeze", dest='epoch_freeze', default=10)
     # Parse the arguments.
     args = parser.parse_args()
 

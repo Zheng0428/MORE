@@ -57,7 +57,7 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "env": {
-                "CUDA_VISIBLE_DEVICES": "1"
+                "CUDA_VISIBLE_DEVICES": "0"
             },
             "args": [
                 "--train",
@@ -83,7 +83,9 @@
                 "--tqdm",
                 "--output",
                 "snap/more/more_lxr955_tiny/",
-                "--tiny"
+                "--tiny",
+                "--epochfreeze",
+                "10"
             ]
         }
     ]
