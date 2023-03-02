@@ -29,6 +29,7 @@ class MOREModel(nn.Module):
         )
 #        hid_dim = self.more_encoder.dim
         self.tokenizer = transformers.GPT2Tokenizer.from_pretrained("gpt2") #load tokenizer
+        self.tokenizer.pad_token = self.tokenizer.eos_token
         transformers.logging.set_verbosity_error()
         self.more_decoder = transformers.GPT2LMHeadModel.from_pretrained('gpt2', num_hidden_layers = 6)
         self.gpt_input_dim = self.more_decoder.lm_head.in_features
@@ -98,11 +99,33 @@ class MOREModel(nn.Module):
         :param reward: (b, 1)
         :return: (b, 50257) 
         """
-
+        texts = [
+            'This is the first text.',
+            'This is the second text.',
+            'This is the third text.',
+            'This is the fourth text.',
+            'This is the fifth text.',
+            'This is the sixth text.',
+            'This is the seventh text.',
+            'This is the eighth text.',
+            'This is the ninth text.',
+            'This is the tenth text.',
+            'This is the eleventh text.',
+            'This is the twelfth text.',
+            'This is the thirteenth text.',
+            'This is the fourteenth text.',
+            'This is the fifteenth text.',
+            'This is the sixteenth text.',
+            'This is the seventeenth text.',
+            'This is the eighteenth text.',
+            'This is the nineteenth text.',
+            'This is the twentieth text.'
+        ]
         x = self.more_encoder(action, (state, pos))
         seq = self.mlp(x[0], x[1], reward)   #mix the output of the lxmert and the reward (numpy)
-        target = self.tokenizer(action, return_tensors="pt")
-        output = self.more_decoder(inputs_embeds = seq, labels=target["input_ids"])  #past_key_values = past 后面有时间可以加上
+        target = self.tokenizer(texts, padding = True, truncation = True, return_tensors = 'pt', max_length = 20, add_special_tokens = True, return_attention_mask = True, return_token_type_ids = False)
+        tmp = target.data["input_ids"].cuda()
+        output = self.more_decoder(inputs_embeds = seq, labels=target.data["input_ids"])  #past_key_values = past 后面有时间可以加上
         return output
 
 

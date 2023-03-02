@@ -95,16 +95,16 @@ class MORE:
                 reward = torch.round(torch.rand(32, 1))
                 target = 'turn left'
                 state, boxes, reward = state.cuda(), boxes.cuda(), reward.cuda()
-                logit = self.model(state, boxes, action, reward, target)
+                output = self.model(state, boxes, action, reward, target)
                 #assert logit.dim() == target.dim() == 2
-                loss = self.bce_loss(logit, target)
-                loss = loss * logit.size(1)
+                loss = self.bce_loss(output, target)
+                loss = loss * output.size(1)
 
                 loss.backward()  #反向传播
                 nn.utils.clip_grad_norm_(self.model.parameters(), 5.)
                 self.optim.step()  #参数更新
 
-                score, label = logit.max(1)
+                score, label = output.max(1)
                 for qid, l in zip(ques_id, label.cpu().numpy()):
                     ans = dset.label2ans[l]
                     quesid2ans[qid.item()] = ans
