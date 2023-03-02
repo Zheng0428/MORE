@@ -93,9 +93,9 @@ class MORE:
                 self.model.train()
                 self.optim.zero_grad()   #梯度归零
                 reward = torch.round(torch.rand(32, 1))
-                state, boxes, target = state.cuda(), boxes.cuda(), target.cuda()
-                
-                logit = self.model(state, boxes, action, reward).logits
+                target = 'turn left'
+                state, boxes, reward = state.cuda(), boxes.cuda(), reward.cuda()
+                logit = self.model(state, boxes, action, reward, target)
                 #assert logit.dim() == target.dim() == 2
                 loss = self.bce_loss(logit, target)
                 loss = loss * logit.size(1)

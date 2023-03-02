@@ -11,10 +11,11 @@ import numpy as np
 ########################################
 import torch
 from torch.nn.parameter import Parameter
+import math, time
 ########################################
 # Max length including <bos> and <eos>
 MAX_VQA_LENGTH = 20
-
+HIDDEN_NUM = 3000
 
 class MOREModel(nn.Module):
     def __init__(self):
@@ -27,54 +28,53 @@ class MOREModel(nn.Module):
             mode = 'l'
         )
 #        hid_dim = self.more_encoder.dim
+        self.tokenizer = transformers.GPT2Tokenizer.from_pretrained("gpt2") #load tokenizer
         transformers.logging.set_verbosity_error()
         self.more_decoder = transformers.GPT2LMHeadModel.from_pretrained('gpt2', num_hidden_layers = 6)
-        # # VQA Answer heads
-        # self.logit_fc = nn.Sequential(
-        #     nn.Linear(hid_dim, hid_dim * 2),
-        #     GeLU(),
-        #     BertLayerNorm(hid_dim * 2, eps=1e-12),
-        #     nn.Linear(hid_dim * 2, num_answers)
-        # )
-        # self.logit_fc.apply(self.lxrt_encoder.model.init_bert_weights)
-
-    def mlp(self, action, state, reward, size):
-        action, state = action.cpu(), state.cpu()
-        num_ia = action.shape[1] * action.shape[2]
-        num_is = state.shape[1] * state.shape[2]
-        num_h = 10000
+        self.gpt_input_dim = self.more_decoder.lm_head.in_features
+        self.gpt_output_dim = self.more_decoder.lm_head.out_features
+        #build mlp model for mix sequence
+        num_ia = self.more_encoder.max_seq_length * self.more_encoder.dim
+        num_is = 36 * self.more_encoder.dim  #state's patch:36
+        size = self.gpt_input_dim - 1  #GPT-2 embed input dim:768,our for reward
         if size % 2 == 1:
             num_oa = size // 2
             num_os = size // 2 + 1
         else:
             num_os = num_oa = size // 2
-        mlp_model_a= MLPModel(num_ia, num_h, num_oa)
-        mlp_model_s= MLPModel(num_is, num_h, num_os)
-        action = mlp_model_a(torch.flatten(action, 1, 2))
-        state = mlp_model_s(torch.flatten(state, 1, 2))
-        seq = np.concatenate((action.detach().numpy(), state.detach().numpy(), reward.detach().numpy()),1)
+        def hidden_size(input, output):
+            return (input + output) * 2 // 3
+        self.mlp_model_a = MLPModel(num_ia, HIDDEN_NUM, num_oa)
+        self.mlp_model_s = MLPModel(num_is, HIDDEN_NUM, num_os)
+        #resize target dim:
+        # self.mlp_model_o = MLPModel(50257, num_oa)
+
+
+    def mlp(self, action, state, reward):
+        action = self.mlp_model_a(torch.flatten(action, 1, 2))
+        state = self.mlp_model_s(torch.flatten(state, 1, 2))
+        seq = torch.cat((action, state, reward),1)
         return seq
 
-
-    def mix(self, action, state, reward, size):
-        action = torch.flatten(action, 1, 2).cpu()
-        state = torch.flatten(state, 1, 2).cpu()
-
+    
+    def mix(self, action, state, reward):
+        action = torch.flatten(action, 1, 2)
+        state = torch.flatten(state, 1, 2)
         batch_size = action.shape[0]
-        action = torch.cat([action, torch.ones(batch_size, 1)], dim=1)
-        state = torch.cat([state, torch.ones(batch_size, 1)], dim=1)
+        action = torch.cat([action, torch.ones(batch_size, 1).cuda()], dim=1)
+        state = torch.cat([state, torch.ones(batch_size, 1).cuda()], dim=1)
 
 
         # 假设所设秩: R = 4, 期望融合后的特征维度: h = 768
-        R, h = 4, size
-        Wa = Parameter(torch.Tensor(R, action.shape[1], h))
-        Wa = torch.nn.init.xavier_normal_(Wa, gain=1.0)
-        Ws = Parameter(torch.Tensor(R, state.shape[1], h))
-        Ws = torch.nn.init.xavier_normal_(Ws, gain=1.0)
-        Wf = Parameter(torch.Tensor(1, R))
-        Wf = torch.nn.init.xavier_normal_(Wf, gain=1.0)
-        bias = Parameter(torch.Tensor(1, h))
-        bias = torch.nn.init.xavier_normal_(bias, gain=1.0)
+        R, h = 4, self.gpt_input_dim - 1
+        Wa = Parameter(torch.Tensor(R, action.shape[1], h)).cuda()
+        Wa = torch.nn.init.xavier_normal_(Wa, gain=1.0).cuda()
+        Ws = Parameter(torch.Tensor(R, state.shape[1], h)).cuda()
+        Ws = torch.nn.init.xavier_normal_(Ws, gain=1.0).cuda()
+        Wf = Parameter(torch.Tensor(1, R)).cuda()
+        Wf = torch.nn.init.xavier_normal_(Wf, gain=1.0).cuda()
+        bias = Parameter(torch.Tensor(1, h)).cuda()
+        bias = torch.nn.init.xavier_normal_(bias, gain=1.0).cuda()
 
         # 分解后，并行提取各模态特征
         fusion_A = torch.matmul(action, Wa)
@@ -85,10 +85,10 @@ class MOREModel(nn.Module):
         funsion_AS = torch.matmul(Wf, funsion_AS.permute(1,0,2)).squeeze() + bias
         #fusion_AS = funsion_AS.detach().numpy()
         #最终输出的seq特征维度是（32，512）
-        seq = np.concatenate((funsion_AS.detach().numpy(), reward.detach().numpy()),1)
+        seq = torch.cat((funsion_AS, reward),1)
         return seq
 
-    def forward(self, state, pos, action, reward):
+    def forward(self, state, pos, action, reward, target):
         """
         b -- batch_size, o -- object_number, f -- visual_feature_size
 
@@ -98,10 +98,11 @@ class MOREModel(nn.Module):
         :param reward: (b, 1)
         :return: (b, 50257) 
         """
+
         x = self.more_encoder(action, (state, pos))
-        #reward = torch.round(torch.rand(32, 1))   #test
-        seq = self.mlp(x[0], x[1], reward, 767)   #mix the output of the lxmert and the reward (numpy)
-        output = self.more_decoder(inputs_embeds = torch.from_numpy(seq).cuda())  #past_key_values = past 后面有时间可以加上
+        seq = self.mlp(x[0], x[1], reward)   #mix the output of the lxmert and the reward (numpy)
+        target = self.tokenizer(action, return_tensors="pt")
+        output = self.more_decoder(inputs_embeds = seq, labels=target["input_ids"])  #past_key_values = past 后面有时间可以加上
         return output
 
 
