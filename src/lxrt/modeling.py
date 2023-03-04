@@ -1017,15 +1017,18 @@ class LXRTFeatureExtraction(BertPreTrainedModel):
             return feat_seq
 ########################################
 class MLPModel(torch.nn.Module):
-    def __init__(self, num_i, num_h, num_o):
+    def __init__(self, input_len, hidden_size, output_len):
         super(MLPModel,self).__init__()
-        self.linear1=torch.nn.Linear(num_i,num_h)
-        self.relu=torch.nn.ReLU()
-        self.linear2=torch.nn.Linear(num_h,num_o) #2个隐层
-  
+        self.output_len = output_len
+        self.fc1 = nn.Linear(input_len * 768, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_len * 768)
+        self.relu = nn.ReLU()
+
     def forward(self, x):
-        x = self.linear1(x)
+        x = torch.flatten(x, 1, 2)
+        x = self.fc1(x)
         x = self.relu(x)
-        x = self.linear2(x)
-        return x
+        x = self.fc2(x)
+        output = x.view(x.size(0), self.output_len, 768)
+        return output
 ########################################
