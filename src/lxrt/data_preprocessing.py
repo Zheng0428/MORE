@@ -30,7 +30,6 @@ def extend_tensor(tensor1, tensor2):
 class MiniGridDataset(Dataset):
     def __init__(self, dataset_path, processor_path="openai/clip-vit-base-patch32", max_length=1000, reward_with_timestep=False):
 
-        self.processor = CLIPProcessor.from_pretrained(processor_path)
         self.reward_with_timestep = reward_with_timestep
         self.max_length = max_length
         self.observations = None
