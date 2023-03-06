@@ -28,7 +28,7 @@ def extend_tensor(tensor1, tensor2):
         return torch.cat((tensor1, tensor2), 0)
 
 class MiniGridDataset(Dataset):
-    def __init__(self, dataset_path, processor_path="openai/clip-vit-base-patch32", max_length=1000, reward_with_timestep=False):
+    def __init__(self, dataset_path, max_length=1000, reward_with_timestep=False):
 
         self.reward_with_timestep = reward_with_timestep
         self.max_length = max_length
